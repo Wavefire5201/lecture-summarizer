@@ -3,8 +3,9 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import datetime
 import os
+import json
 
-from browser import *
+from browser import get_caption_url, get_html
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -22,7 +23,7 @@ class VideoURL(BaseModel):
         return f"VideoIDS(date={self.date}, uuid={self.uuid})"
 
 
-def parse_video_urls(html) -> VideoURL:
+def parse_video_urls(html: str) -> VideoURL | None:
     completion = client.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
@@ -43,35 +44,32 @@ def parse_video_urls(html) -> VideoURL:
 
 video_data = parse_video_urls(html)
 
-import json
+if video_data:
+    results = []
+    for date_str, uuid in zip(video_data.date, video_data.uuid):
+        try:
+            datetime_object = datetime.datetime.strptime(date_str, time_format)
+            url = f"{base_url}{uuid}"
+            caption_url = get_caption_url(get_html(uuid))
 
-# Create a list to hold the results
-results = []
+            print(f"Date: {datetime_object}, URL: {url}")
+            print(f"Caption URL: {caption_url}")
 
-for date_str, uuid in zip(video_data.date, video_data.uuid):
-    try:
-        datetime_object = datetime.datetime.strptime(date_str, time_format)
-        url = f"{base_url}{uuid}"
-        caption_url = get_caption_url(get_html(uuid))
+            results.append(
+                {
+                    "uuid": uuid,
+                    "date": datetime_object.strftime(time_format),
+                    "url": url,
+                    "caption_url": caption_url,
+                }
+            )
 
-        # Print the information
-        print(f"Date: {datetime_object}, URL: {url}")
-        print(f"Caption URL: {caption_url}")
-        print("\n")
+        except ValueError as e:
+            print(f"Error parsing date string '{date_str}': {e}")
+            print(f"UUID associated with the unparsable date: {uuid}")
 
-        # Append results to the list
-        results.append(
-            {
-                "date": datetime_object.strftime(time_format),
-                "url": url,
-                "caption_url": caption_url,
-            }
-        )
+    with open("video_data.json", "w") as json_file:
+        json.dump(results, json_file, indent=4)
 
-    except ValueError as e:
-        print(f"Error parsing date string '{date_str}': {e}")
-        print(f"UUID associated with the unparsable date: {uuid}")
-
-# Write results to a JSON file
-with open("video_data.json", "w") as json_file:
-    json.dump(results, json_file, indent=4)
+# run to start the browser
+# google-chrome-stable --remote-debugging-port=9222 --user-data-dir="/home/wavefire/.config/google-chrome"

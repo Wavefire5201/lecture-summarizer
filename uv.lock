@@ -308,7 +308,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lectures-online-summarizer"
+name = "lecture-summarizer"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -1,6 +1,7 @@
 .venv/
 .env
 lectures/
+captions/
 __pycache__/
 *.py[cod]
 *.pyo
