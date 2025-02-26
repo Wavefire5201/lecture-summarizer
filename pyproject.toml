@@ -1,0 +1,14 @@
+[project]
+name = "lectures-online-summarizer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bs4>=0.0.2",
+    "helium>=5.1.1",
+    "openai>=1.64.0",
+    "python-dotenv>=1.0.1",
+    "streamlit>=1.41.1",
+    "yt-dlp>=2025.1.26",
+]
