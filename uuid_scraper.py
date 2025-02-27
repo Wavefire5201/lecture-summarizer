@@ -2,16 +2,17 @@ from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
 import datetime
+import requests
 import os
 import json
 from pypdf import PdfReader
-from browser import get_caption_url, get_html
+from browser import get_html, get_caption_url
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 time_format = "%Y-%m-%d %H:%M:%S"
 base_url = "https://lecturecapture.la.utexas.edu/player/episode/"
-with open("./his315L_data.txt", "r") as f:
+with open("429_data.txt", "r") as f:
     html = f.read()
 
 
@@ -73,10 +74,6 @@ def save_video_data(video_data: VideoURL, filename: str) -> None:
             json.dump(results, json_file, indent=4)
     else:
         print("No video data found.")
-
-
-# run to start the browser
-# google-chrome-stable --remote-debugging-port=9222 --user-data-dir="/home/wavefire/.config/google-chrome"
 
 
 def create_notes(filename: str):
@@ -185,5 +182,87 @@ def rename_pdfs():
             os.rename(f"pdfs/{filename}", f"pdfs/{video_data[i]['uuid']}.pdf")
 
 
-save_video_data(parse_video_urls(html), "HIS315L.json")
-create_notes("HIS315L.json")
+# run to start the browser
+# google-chrome-stable --remote-debugging-port=9222 --user-data-dir="/home/wavefire/.config/google-chrome"
+
+
+def download_captions(caption_url, output_file):
+    os.makedirs("captions", exist_ok=True)
+    response = requests.get(caption_url)
+    if response.status_code == 200:
+        with open(output_file, "wb") as f:
+            f.write(response.content)
+        print(f"Downloaded: {output_file}")
+    else:
+        print(f"Failed to download: {caption_url}")
+
+
+def download_all_captions(video_data: list[dict]):
+    for video in video_data:
+        caption_url = video["caption_url"]
+        if caption_url:
+            output_file = f"captions/{video['uuid']}.vtt"
+            download_captions(caption_url, output_file)
+        else:
+            print(f"No caption URL for video on {video['date']}")
+
+
+# save_video_data(parse_video_urls(html), "HIS315L.json")
+# create_notes("HIS315L.json")
+
+
+def rename_captions_from_uuid_to_date(video_data: list[dict]):
+    os.makedirs("captions_with_dates", exist_ok=True)
+    for video in video_data:
+        date = video["date"].split(" ")[0]
+        uuid = video["uuid"]
+        caption_file = f"captions/{uuid}.vtt"
+        new_caption_file = f"captions_with_dates/{date}.vtt"
+        if os.path.exists(caption_file):
+            # Copy the file to new directory with new name
+            with open(caption_file, "rb") as src_file:
+                with open(new_caption_file, "wb") as dst_file:
+                    dst_file.write(src_file.read())
+            print(f"Copied {caption_file} to {new_caption_file}")
+        else:
+            print(f"{caption_file} does not exist")
+
+
+def main():
+    file = input("Enter the file name: ")
+    with open(file, "r") as f:
+        video_data = json.load(f)
+
+    print("Select a date to view captions for:")
+    for i, video in enumerate(video_data):
+        print(f"{i + 1}. {video['date']}")
+    choice = int(input("Enter your choice: ")) - 1
+    if 0 <= choice < len(video_data):
+        video = video_data[choice]
+        caption_url = video["caption_url"]
+        output_file = f"captions/{video['uuid']}.vtt"
+        # if output file exists
+        if os.path.exists(output_file):
+            with open(output_file, "r") as f:
+                captions = f.read()
+            print(captions)
+        else:
+            print("Downloading captions...")
+            download_captions(caption_url, output_file)
+            with open(output_file, "r") as f:
+                captions = f.read()
+            print(captions)
+    else:
+        print("Invalid choice")
+
+
+if __name__ == "__main__":
+    # while True:
+    #     try:
+    #         main()
+    #     except KeyboardInterrupt:
+    #         break
+    with open("HIS315L.json", "r") as f:
+        video_data = json.load(f)
+    download_all_captions(video_data)
+    rename_captions_from_uuid_to_date(video_data)
