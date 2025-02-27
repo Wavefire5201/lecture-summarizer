@@ -2,6 +2,7 @@
 .env
 lectures/
 captions/
+captions_with_dates/
 notes/
 pdfs/
 __pycache__/
