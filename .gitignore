@@ -2,7 +2,10 @@
 .env
 lectures/
 captions/
+notes/
+pdfs/
 __pycache__/
+.ropeproject/
 *.py[cod]
 *.pyo
 *.pyd
