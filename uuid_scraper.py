@@ -5,12 +5,13 @@ import datetime
 import os
 import json
 from pypdf import PdfReader
+from browser import get_caption_url, get_html
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 time_format = "%Y-%m-%d %H:%M:%S"
 base_url = "https://lecturecapture.la.utexas.edu/player/episode/"
-with open("429_data.txt", "r") as f:
+with open("./his315L_data.txt", "r") as f:
     html = f.read()
 
 
@@ -23,8 +24,6 @@ class VideoURL(BaseModel):
 
 
 class LectureNote(BaseModel):
-    title: str
-    date: str
     notes: str
 
     def __str__(self):
@@ -76,8 +75,6 @@ def save_video_data(video_data: VideoURL, filename: str) -> None:
         print("No video data found.")
 
 
-# save_video_data(parse_video_urls(html), "video_data.json")
-
 # run to start the browser
 # google-chrome-stable --remote-debugging-port=9222 --user-data-dir="/home/wavefire/.config/google-chrome"
 
@@ -122,7 +119,7 @@ def create_notes(filename: str):
 
             try:
                 completion = client.beta.chat.completions.parse(
-                    model="gpt-4o-mini",
+                    model="gpt-4o",
                     messages=[
                         {
                             "role": "system",
@@ -137,10 +134,25 @@ def create_notes(filename: str):
                         {
                             "role": "user",
                             "content": f"""
-                            I have a transcript of my lecture and the slides that goes with it. Make a comprehensive and detailed notes document in markdown to fully capture the ideas taught in this lecture. Make sure to not leave any information and expand on any information if needed. The title and first line should be in the format of "# Lecture Topic - Date"
+                            I have a transcript of my lecture and the slides that goes with it. Make a comprehensive and detailed notes document in markdown to fully capture the ideas taught in this lecture. Make sure to not leave any information and expand on any information if needed. The title and first line should be in the format of "# Lecture Topic - Date". Since I'm going to use quarts to host it, include metadata at the start of the markdown in this format (don't bold any words in the metadata), don't include any images or links:
+                            ---
+                            title: (Lecture Topic here)
+                            date: (YYYY-MM-DD format, as in when the lecture took place)
+                            tags: 
+                                - topic1
+                                - topic2
+                                - include as necessary and relevant, all lowercase, no dashes, only spaces
+                            ---
+                            # Lecture Overview
+                            - Topics:
+                             ...
+
+                            [rest of content here]
+                            
 
                             Caption Data: {captions}
                             PDF Data: {pdf_data}
+                            Date: {video['date']}
                             """,
                         },
                     ],
@@ -173,4 +185,5 @@ def rename_pdfs():
             os.rename(f"pdfs/{filename}", f"pdfs/{video_data[i]['uuid']}.pdf")
 
 
-create_notes("429_exam1.json")
+save_video_data(parse_video_urls(html), "HIS315L.json")
+create_notes("HIS315L.json")
