@@ -11,13 +11,16 @@ chrome_options.add_experimental_option("debuggerAddress", "localhost:9222")
 driver = webdriver.Chrome(options=chrome_options)
 
 
-def get_html(video_uuid: str) -> str:
+def get_caption_html(video_uuid: str) -> str:
+    print(f"Getting caption html for {video_uuid}")
     driver.get(f"{base_url}{video_uuid}")
     time.sleep(1)
     return driver.page_source
 
 
 def get_caption_url(html: str) -> str | None:
+    print("Getting caption url")
+    # print(html)
     match = re.findall(caption_pattern, html)
     if match:
         return match[0]

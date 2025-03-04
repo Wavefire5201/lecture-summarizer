@@ -1,21 +1,29 @@
-from pydantic import BaseModel
-from openai import OpenAI
-from dotenv import load_dotenv
 import datetime
-import requests
-import os
 import json
+import os
+import re
+
+import ollama
+import requests
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from ollama import ChatResponse
+from openai import OpenAI
+from pydantic import BaseModel
 from pypdf import PdfReader
-from browser import get_html, get_caption_url
+
+from browser import get_caption_url, get_caption_html
 
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-time_format = "%Y-%m-%d %H:%M:%S"
-base_url = "https://lecturecapture.la.utexas.edu/player/episode/"
-with open("429_data.txt", "r") as f:
-    html = f.read()
+# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY")
+)
+TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+BASE_URL = os.getenv("LECTURES_ONLINE_BASE_URL")
 
 
+# for structured output
 class VideoURL(BaseModel):
     date: list[str]
     uuid: list[str]
@@ -24,20 +32,35 @@ class VideoURL(BaseModel):
         return f"VideoIDS(date={self.date}, uuid={self.uuid})"
 
 
+class Video:
+    def __init__(self, uuid, date, time):
+        self.uuid = uuid
+        self.date = date
+        self.time = time
+
+    def get_url(self):
+        return os.getenv("LECTURES_ONLINE_BASE_URL") + self.uuid
+
+    def __str__(self):
+        return f"UUID: {self.uuid}, Date: {self.date}, Time: {self.time}"
+
+
 class LectureNote(BaseModel):
     notes: str
 
     def __str__(self):
-        return f"LectureNote(title={self.title}, date={self.date}, notes={self.notes})"
+        return f"LectureNote(notes={self.notes})"
 
 
+# remove in favor of actual html parsing and not wasting an LLM to do it
 def parse_video_urls(html: str) -> VideoURL | None:
     completion = client.beta.chat.completions.parse(
         model="gpt-4o-mini",
+        # model="google/gemini-2.0-flash-exp:free",
         messages=[
             {
                 "role": "system",
-                "content": "You are an html parser. Extract all of the UUIDS corresponding dates from the text. Return the date as python datetime string in '%Y-%m-%d %H:%M:%S', always at 1pm or 1300",
+                "content": "You are an html parser. Extract all of the UUIDS and corresponding dates from the text. Return the date as python datetime string in '%Y-%m-%d %H:%M:%S'.",
             },
             {
                 "role": "user",
@@ -49,20 +72,46 @@ def parse_video_urls(html: str) -> VideoURL | None:
     return completion.choices[0].message.parsed
 
 
-def save_video_data(video_data: VideoURL, filename: str) -> None:
+def extract_video_data(html_content: str) -> list[Video]:
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # Find all the divs that contain the video links and dates
+    video_divs = soup.find_all("div", class_="col-md-4")
+
+    video_data = []
+    for div in video_divs:
+        links = div.find_all("a", href=True)
+        for link in links:
+            uuid = link["href"].split("/")[-1]
+            date_span = link.find_next("span")
+            if date_span:
+                span_text = date_span.text
+                date = (
+                    re.search(r"\((\d{2}/\d{2}/\d{4})\)", span_text)
+                    .group(1)
+                    .replace("/", "-")
+                )
+                time = re.search(r"(\d{1,2}:\d{2}[ap]m)", span_text).group(1)
+
+                video_data.append(Video(uuid, date, time))
+
+    return video_data
+
+
+def save_video_data_old(video_data: VideoURL, filename: str) -> None:
     if video_data:
         results = []
         for date_str, uuid in zip(video_data.date, video_data.uuid):
             try:
-                datetime_object = datetime.datetime.strptime(date_str, time_format)
-                url = f"{base_url}{uuid}"
-                caption_url = get_caption_url(get_html(uuid))
+                datetime_object = datetime.datetime.strptime(date_str, TIME_FORMAT)
+                url = f"{BASE_URL}{uuid}"
+                caption_url = get_caption_url(get_caption_html(uuid))
                 print(f"Date: {datetime_object}, URL: {url}")
                 print(f"Caption URL: {caption_url}")
                 results.append(
                     {
                         "uuid": uuid,
-                        "date": datetime_object.strftime(time_format),
+                        "date": datetime_object.strftime(TIME_FORMAT),
                         "url": url,
                         "caption_url": caption_url,
                     }
@@ -76,47 +125,72 @@ def save_video_data(video_data: VideoURL, filename: str) -> None:
         print("No video data found.")
 
 
+def save_video_data(video_data: list[Video], filename: str) -> None:
+    results = []
+    for video in video_data:
+        try:
+            # datetime_object = datetime.datetime.strptime(video.date, "%m/%d/%Y")
+            url = f"{BASE_URL}{video.uuid}"
+            caption_url = get_caption_url(get_caption_html(video.uuid))
+            print(f"Date: {video.date} {video.time}, URL: {url}")
+            print(f"Caption URL: {caption_url}")
+            results.append(
+                {
+                    "uuid": video.uuid,
+                    "date": video.date + " " + video.time,
+                    "url": url,
+                    "caption_url": caption_url,
+                }
+            )
+        except ValueError as e:
+            print(f"Error parsing date string '{video.date}': {e}")
+            print(f"UUID associated with the unparsable date: {video.uuid}")
+    with open(filename, "w") as json_file:
+        json.dump(results, json_file, indent=4)
+
+
 def create_notes(filename: str):
     with open(filename, "r") as f:
         video_data = json.load(f)
 
     for video in video_data:
         try:
+            # print(filename.split(".")[0])
+            os.makedirs(f"notes/{filename.split('.')[0]}", exist_ok=True)
             caption_file = f"captions/{video['uuid']}.vtt"
-            pdf_file = f"pdfs/{video['uuid']}.pdf"
-            output_file = f"notes/{video['date']}.md"
-
+            # pdf_file = f"pdfs/{video['uuid']}.pdf"
+            output_file = f"notes/{filename.split('.')[0]}/{video['date']}.md"
             if os.path.exists(output_file):
                 print(f"Skipping {video['date']} - notes already exist")
                 continue
 
-            if not os.path.exists(caption_file) or not os.path.exists(pdf_file):
+            if not os.path.exists(caption_file):
                 print(f"Missing files for {video['date']}, skipping...")
                 continue
             print(f"Creating notes for {video['date']}")
 
             with open(caption_file, "r") as f:
                 captions = f.read()
-            pdf_data = ""
-            reader = PdfReader(pdf_file)
-            for i, page in enumerate(reader.pages):
-                pdf_data += f"Start Page {i + 1}:\n"
-                pdf_data += page.extract_text()
-                pdf_data += f"\nEnd Page {i + 1}:\n"
+            # pdf_data = ""
+            # reader = PdfReader(pdf_file)
+            # for i, page in enumerate(reader.pages):
+            #     pdf_data += f"Start Page {i + 1}:\n"
+            #     pdf_data += page.extract_text()
+            #     pdf_data += f"\nEnd Page {i + 1}:\n"
 
-            print(
-                f"Processing {len(pdf_data)} characters of PDF data and {len(captions)} characters of caption data."
-            )
-            print(
-                f"PDF data: {pdf_data[:100]}..."
-            )  # Print the first 100 characters of PDF data
+            # print(
+            #     f"Processing {len(pdf_data)} characters of PDF data and {len(captions)} characters of caption data."
+            # )
+            # print(
+            #     f"PDF data: {pdf_data[:100]}..."
+            # )  # Print the first 100 characters of PDF data
             print(
                 f"Caption data: {captions[:100]}..."
             )  # Print the first 100 characters of caption data
 
             try:
                 completion = client.beta.chat.completions.parse(
-                    model="gpt-4o",
+                    model="google/gemini-2.0-flash-exp:free",
                     messages=[
                         {
                             "role": "system",
@@ -148,8 +222,7 @@ def create_notes(filename: str):
                             
 
                             Caption Data: {captions}
-                            PDF Data: {pdf_data}
-                            Date: {video['date']}
+                            Date: {video["date"]}
                             """,
                         },
                     ],
@@ -207,10 +280,6 @@ def download_all_captions(video_data: list[dict]):
             print(f"No caption URL for video on {video['date']}")
 
 
-# save_video_data(parse_video_urls(html), "HIS315L.json")
-# create_notes("HIS315L.json")
-
-
 def rename_captions_from_uuid_to_date(video_data: list[dict]):
     os.makedirs("captions_with_dates", exist_ok=True)
     for video in video_data:
@@ -256,13 +325,26 @@ def main():
         print("Invalid choice")
 
 
-if __name__ == "__main__":
-    # while True:
-    #     try:
-    #         main()
-    #     except KeyboardInterrupt:
-    #         break
-    with open("HIS315L.json", "r") as f:
-        video_data = json.load(f)
-    download_all_captions(video_data)
-    rename_captions_from_uuid_to_date(video_data)
+# if __name__ == "__main__":
+#     # while True:
+#     #     try:
+#     #         main()
+#     #     except KeyboardInterrupt:
+#     #         break
+#     with open("HIS315L.json", "r") as f:
+#         video_data = json.load(f)
+#     download_all_captions(video_data)
+#     rename_captions_from_uuid_to_date(video_data)
+
+name = "CS311"
+with open(f"html/{name}.html", "r") as f:
+    html = f.read()
+
+save_video_data(extract_video_data(html), f"{name}.json")
+
+with open(f"{name}.json", "r") as f:
+    video_data = json.load(f)
+    # print(video_data)
+
+download_all_captions(video_data)
+create_notes(f"{name}.json")

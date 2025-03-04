@@ -1,3 +1,4 @@
+__pycache__/
 .venv/
 .env
 lectures/
@@ -5,18 +6,5 @@ captions/
 captions_with_dates/
 notes/
 pdfs/
-__pycache__/
-.ropeproject/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-dist/
-build/
-*.log
-*.sqlite3
-*.db
-*.DS_Store
-*.egg
-*.wheel
-*.migrations/
+html/
+data/
